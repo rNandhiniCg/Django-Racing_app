@@ -32,11 +32,7 @@ class Team(models.Model):
     def __str__(self):
         return self.name
 
-    def delete(self, *args, **kwargs):
-        if self.drivers.filter(registered_races__isnull = False).exists():
-            raise ValidationError("Cannot delete team: One or more drivers have registered for races.")
-        super().delete(*args, **kwargs)
-    
+   
 class Driver(models.Model):
     first_name = models.CharField(max_length=96, null=False)
     last_name = models.CharField(max_length=96, null=False)
@@ -66,11 +62,6 @@ class Race(models.Model):
         if self.registration_closure_date and self.race_date:
             if self.registration_closure_date >= self.race_date:
                 raise ValidationError("Registration Closure date must be before the Race date !")
- 
-    def delete(self, *args, **kwargs):
-        if self.registered_drivers.exists():
-            raise ValidationError("Cannot delete race with registered drivers.")
-        super().delete(*args, **kwargs)
 
 
 
