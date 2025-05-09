@@ -5,8 +5,14 @@ from django.views.generic import DeleteView
 from django.core.exceptions import ValidationError
 from django.contrib import messages
 from django.utils import timezone
+
+from rest_framework import viewsets, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.decorators import api_view
 from .models import *
 from .forms import *
+from .serializers import *
 
 # Create your views here.
 
@@ -42,7 +48,6 @@ def team_edit(request, pk):
         form = TeamForm(instance=team)
     return render(request, 'team/team_form.html', {'form': form})
   
-
 class TeamDeleteView(DeleteView):
     model= Team
     success_url= reverse_lazy('team_list')
@@ -56,7 +61,6 @@ class TeamDeleteView(DeleteView):
             return HttpResponseRedirect(self.success_url)
         
         return super().delete(request, *args, **kwargs)
-
 
 ''' 
 def team_delete(request, pk):
@@ -122,7 +126,7 @@ class DriverDeleteView(DeleteView):
 
     def delete(self, request, *args, **kwargs):
         self.object= self.get_object()
-        if self.object.registered_races.exists():
+        if self.object.registered_races.exists():   # Prevent deletion if registered to at least one race
             messages.error(self.request, "Cannot delete Driver: Driver have registered for races. ")
             return HttpResponseRedirect(self.success_url)
         
@@ -138,7 +142,6 @@ def driver_delete(request, pk):
         print("Driver deleted, Successfully ")
         return redirect('driver_list')
 '''    
-
 
 #Race Views***
 def race_list(request):
@@ -233,3 +236,95 @@ def edit_race_drivers(request, race_id):
         form=  EditRaceDriversForm(initial={'drivers':race.registered_drivers.all()})
         
     return render(request, 'register_driver.html', {'form': form, 'title': f"Add/Edit Drivers for 'Race_{race}\'"})
+
+#API Views***
+#TEAM - create, list, retrieve, update, delete (+ deletion restriction logic)
+class TeamViewSet(viewsets.ModelViewSet):
+    queryset = Team.objects.all()
+    serializer_class = TeamSerializer
+ 
+    def destroy(self, request, *args, **kwargs):
+        team = self.get_object()
+        if team.drivers.exists():
+            return Response(
+                {"error": "Cannot delete team with registered drivers."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
+
+
+class DriverViewSet(viewsets.ModelViewSet):
+    queryset = Driver.objects.all()
+    serializer_class = DriverSerializer
+ 
+    def destroy(self, request, *args, **kwargs):
+        driver = self.get_object()
+        if driver.registered_races.exists():
+            return Response(
+                {"error": "Cannot delete driver registered in a race."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
+
+'''
+@api_view(['GET'])
+def race_detail(request, pk):
+    race= Race.objects.get(pk= pk)
+    serializer= RaceSerializer(race)
+    return Response(serializer.data)
+'''
+
+class RaceViewSet(viewsets.ModelViewSet):
+    queryset = Race.objects.all()
+    serializer_class = RaceSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        race = self.get_object()
+        if race.registered_drivers.exists():
+            return Response(
+                {"error": "Cannot delete race with registered drivers."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        else:
+            return Response("Race deleted succesfully ")
+        return super().destroy(request, *args, **kwargs)
+ 
+    def perform_create(self, serializer):
+        race_date = serializer.validated_data.get('race_date')
+        registration_closure_date = serializer.validated_data.get('registration_closure_date')
+        if race_date <= date.today():
+            raise serializers.ValidationError("Race date must be in the future.")
+        if registration_closure_date >= race_date:
+            raise serializers.ValidationError("Registration closure date must be in the past.")
+        serializer.save()
+
+
+
+class AddDriversToRaceAPIView(APIView):
+    def post(self, request, race_id):
+        race = get_object_or_404(Race, id=race_id)
+        serializer = AddDriversToRaceSerializer2(data=request.data, context= {'race':race})
+        if serializer.is_valid():
+            drivers = serializer.validated_data['drivers']
+            race.registered_drivers.add(*drivers)
+            return Response({'message': 'Drivers added to race successfully.'})
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class AddRacesToDriverAPIView(APIView):
+    def post(self, request, driver_id):
+        driver = get_object_or_404(Driver, id=driver_id)
+        serializer = AddRacesToDriverSerializer2(data=request.data, context={'driver': driver})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response({'message': 'Races added to driver successfully.'})
+
+        
+'''
+        if serializer.is_valid():
+            races = serializer.validated_data['races']
+            driver.registered_races.add(*races)
+            return Response({'message': 'Races added to driver successfully.'})
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+'''
+ 
